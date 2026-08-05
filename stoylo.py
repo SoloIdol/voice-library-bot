@@ -2,19 +2,18 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import InlineQueryResultCachedAudio
-from aiogram.exceptions import TelegramConflictError
+from aiogram.types import InlineQueryResultCachedDocument
 
 
 # ============================================================
 # НАСТРОЙКИ
 # ============================================================
 
-API_TOKEN = "8712123008:AAHiO9cEOT_Qkghgb7JpsnzReKXVa1oFNGg"
+API_TOKEN = "ВСТАВЬ_СЮДА_СВОЙ_ТОКЕН"
 
 
 # ============================================================
-# БАЗА АУДИО
+# БАЗА ФАЙЛОВ
 # ============================================================
 
 AUDIO_DATABASE = [
@@ -40,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# BOT / DISPATCHER
+# BOT
 # ============================================================
 
 bot = Bot(token=API_TOKEN)
@@ -55,35 +54,35 @@ dp = Dispatcher()
 async def get_audio_file_id(message: types.Message):
 
     if message.audio:
-        f_type = "AUDIO"
-        f_id = message.audio.file_id
+        file_type = "AUDIO"
+        file_id = message.audio.file_id
 
     elif message.voice:
-        f_type = "VOICE"
-        f_id = message.voice.file_id
+        file_type = "VOICE"
+        file_id = message.voice.file_id
 
     elif message.document:
-        f_type = "DOCUMENT"
-        f_id = message.document.file_id
+        file_type = "DOCUMENT"
+        file_id = message.document.file_id
 
     else:
-        f_type = "UNKNOWN"
-        f_id = "N/A"
+        file_type = "UNKNOWN"
+        file_id = "N/A"
 
     text = (
-        f"Тип файла: <b>{f_type}</b>\n"
+        f"Тип файла: <b>{file_type}</b>\n"
         f"file_id:\n"
-        f"<code>{f_id}</code>"
+        f"<code>{file_id}</code>"
     )
 
     await message.reply(
         text,
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
 
 # ============================================================
-# INLINE SEARCH
+# INLINE QUERY
 # ============================================================
 
 @dp.inline_query()
@@ -95,51 +94,60 @@ async def inline_query_handler(query: types.InlineQuery):
 
     for item in AUDIO_DATABASE:
 
-        title = item.get("title", "").strip()
+        # Получаем данные
+        item_id = str(item.get("id", "")).strip()
+        title = str(item.get("title", "")).strip()
+        file_id = str(item.get("file_id", "")).strip()
+
+        # Не добавляем битые записи
+        if not item_id:
+            continue
 
         if not title:
             continue
 
-        # Если пользователь ничего не ввёл —
-        # показываем все аудио.
-        #
-        # Если ввёл текст —
-        # ищем по названию.
-        if search_text and search_text not in title.lower():
-            continue
-
-        file_id = item.get("file_id", "").strip()
-
         if not file_id:
             continue
 
-        performer = item.get("performer", "").strip()
+        # Поиск по названию
+        if search_text:
+            if search_text not in title.lower():
+                continue
 
+        # ====================================================
         # ВАЖНО:
-        # Используем только CachedAudio.
+        # Используем CachedDocument вместо CachedAudio.
         #
-        # Не отправляем этот file_id одновременно
-        # как Document.
+        # Это позволяет избежать AUDIO_TITLE_EMPTY.
+        # ====================================================
+
         results.append(
-            InlineQueryResultCachedAudio(
-                id=f"{item['id']}_audio",
-                audio_file_id=file_id,
+            InlineQueryResultCachedDocument(
+                id=f"{item_id}_file",
                 title=title,
-                performer=performer or "Хохол",
+                document_file_id=file_id,
             )
         )
 
     try:
+
         await query.answer(
             results=results,
             cache_time=0,
             is_personal=True,
         )
 
-    except Exception as e:
+        logger.info(
+            "Inline query обработан: '%s', результатов: %d",
+            query.query,
+            len(results),
+        )
+
+    except Exception as error:
+
         logger.exception(
             "Ошибка при ответе на inline query: %s",
-            e
+            error,
         )
 
 
@@ -151,9 +159,11 @@ async def main():
 
     logger.info("Запуск бота...")
 
-    # Удаляем старые webhook/update queue.
-    # Это важно, если раньше бот запускался другим способом.
-    await bot.delete_webhook(drop_pending_updates=True)
+    # Удаляем webhook, если он когда-либо использовался.
+    # Старые ожидающие обновления удаляем.
+    await bot.delete_webhook(
+        drop_pending_updates=True
+    )
 
     logger.info("Polling запущен.")
 
@@ -164,16 +174,6 @@ async def main():
             allowed_updates=dp.resolve_used_update_types(),
         )
 
-    except TelegramConflictError:
-
-        logger.error(
-            "TELEGRAM CONFLICT: "
-            "уже запущен другой экземпляр этого бота. "
-            "Остановите старый контейнер/процесс."
-        )
-
-        raise
-
     finally:
 
         await bot.session.close()
@@ -182,13 +182,17 @@ async def main():
 
 
 # ============================================================
-# ENTRY POINT
+# START
 # ============================================================
 
 if __name__ == "__main__":
 
     try:
+
         asyncio.run(main())
 
     except KeyboardInterrupt:
-        logger.info("Бот остановлен вручную.")
+
+        logger.info(
+            "Бот остановлен пользователем."
+        )
