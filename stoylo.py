@@ -1,27 +1,23 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import (
-    InlineQueryResultCachedAudio,
-    InlineQueryResultCachedDocument,
-    InlineQueryResultCachedVoice
-)
+from aiogram.types import InlineQueryResultCachedAudio
 
 API_TOKEN = "8712123008:AAHiO9cEOT_Qkghgb7JpsnzReKXVa1oFNGg"
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# База данных
+# --- ВСТАВЛЕН ТВОЙ САМЫЙ СВЕЖИЙ FILE_ID С ПОСЛЕДНЕГО СКРИНШОТА ---
 AUDIO_DATABASE = [
     {
         "id": "1",
         "title": "Семья",
-        "file_id": "CQACAgQAAxkBAAMLanMxIZ_GTCJ0Z-cP7tk3oLM1HyoAAlwbAAILZJhTRZ-4AnVzF9A9BA",
+        "file_id": "CQACAgQAAxkBAAMLanMxIZ_GTCJ0Z-cP7tk3oLM1HyoAA1wbAAILZJhTRz-4AnVzF9A9BA",
         "performer": "Хохол"
     },
 ]
 
-# 1. ХЭНДЛЕР ДЛЯ ВЫЯСНЕНИЯ ТОЧНОГО ТИПА ФАЙЛА И ЕГО FILE_ID
+# 1. Хэндлер для получения file_id и типа
 @dp.message(F.audio | F.voice | F.document)
 async def get_audio_file_id(message: types.Message):
     if message.audio:
@@ -41,7 +37,7 @@ async def get_audio_file_id(message: types.Message):
     await message.reply(text, parse_mode="HTML")
 
 
-# 2. ИНЛАЙН ХЭНДЛЕР С ФОЛЛБЕКОМ (пробуем отдавать файл через Document и Audio)
+# 2. Чистый инлайн-хэндлер
 @dp.inline_query()
 async def inline_query_handler(query: types.InlineQuery):
     text = query.query.strip().lower()
@@ -49,20 +45,15 @@ async def inline_query_handler(query: types.InlineQuery):
 
     for item in AUDIO_DATABASE:
         if not text or text in item["title"].lower():
-            # Добавляем варианты выдачи (Telegram сам выберет или выведет карточки)
+            # Гарантируем, что title не будет пустым!
+            title_text = item.get("title") or "Аудиозапись"
+            
             results.append(
                 InlineQueryResultCachedAudio(
-                    id=f"{item['id']}_audio",
+                    id=str(item["id"]),
                     audio_file_id=item["file_id"],
-                    title=f"{item['title']} (Аудио)",
-                    performer=item.get("performer", "")
-                )
-            )
-            results.append(
-                InlineQueryResultCachedDocument(
-                    id=f"{item['id']}_doc",
-                    title=f"{item['title']} (Файл)",
-                    document_file_id=item["file_id"]
+                    title=title_text,
+                    performer=item.get("performer", "Бот")
                 )
             )
 
