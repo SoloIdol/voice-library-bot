@@ -11,7 +11,7 @@ AUDIO_DATABASE = [
     {
         "id": "1",
         "title": "Семья",
-        "file_id": "CQACAgQAAxkBAAMGanMpdRHhf8vhQcCtKLiJ4Vv6v08AAIibAAILZhTu3qt711LShI9BA",
+        "file_id": "CQACAgQAAxkBAAMJanMtE5MeIVs04_f2MiixdaZV4AkAAlobAAILZJhTUcybhiD6yJY9BA",
         "performer": "Хохол"
     },
 ]
