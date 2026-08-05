@@ -1,13 +1,12 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import InlineQueryResultCachedAudio
+from aiogram.types import InlineQueryResultCachedAudio, InlineQueryResultCachedVoice
 
 API_TOKEN = "8712123008:AAHiO9cEOT_Qkghgb7JpsnzReKXVa1oFNGg"
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# --- БАЗА ДАННЫХ АУДИО (СЮДА ВСТАВЛЯЙТЕ ПОЛУЧЕННЫЕ FILE_ID) ---
 AUDIO_DATABASE = [
     {
         "id": "1",
@@ -15,32 +14,31 @@ AUDIO_DATABASE = [
         "file_id": "CQACAgQAAxkBAAMGanMpdRHhf8vhQcCtKLiJ4Vv6v08AAIibAAILZhTu3qt711LShI9BA",
         "performer": "Хохол"
     },
-    # Добавляйте новые аудио по аналогии:
-    # {
-    #     "id": "2",
-    #     "title": "Вторая фразка",
-    #     "file_id": "ДРУГОЙ_FILE_ID",
-    #     "performer": "Хохол"
-    # },
 ]
 
-# --- 1. ХЭНДЛЕР ДЛЯ ПОЛУЧЕНИЯ FILE_ID ОТ БОТА ---
-# Просто отправьте файл .mp3 боту в ЛС, и он пришлёт вам file_id
-@dp.message(F.audio)
+# Хэндлер ловит и audio, и voice, и document (mp3)
+@dp.message(F.audio | F.voice | F.document)
 async def get_audio_file_id(message: types.Message):
-    file_id = message.audio.file_id
-    await message.reply(f"Ваш file_id:\n`{file_id}`", parse_mode="HTML")
+    file_id = None
+    if message.audio:
+        file_id = message.audio.file_id
+    elif message.voice:
+        file_id = message.voice.file_id
+    elif message.document:
+        file_id = message.document.file_id
+
+    # Используем MarkdownV2 или HTML корректно
+    await message.reply(f"Ваш file_id:\n<code>{file_id}</code>", parse_mode="HTML")
 
 
-# --- 2. ИНЛАЙН-РЕЖИМ (ПОИСК И ВЫДАЧА ЗВУКОВ) ---
 @dp.inline_query()
 async def inline_query_handler(query: types.InlineQuery):
-    text = query.query.lower()
+    text = query.query.strip().lower()
     results = []
 
     for item in AUDIO_DATABASE:
-        # Фильтрация по поисковому запросу
-        if text in item["title"].lower():
+        # Если запрос пустой или совпадает с названием
+        if not text or text in item["title"].lower():
             results.append(
                 InlineQueryResultCachedAudio(
                     id=item["id"],
@@ -50,6 +48,7 @@ async def inline_query_handler(query: types.InlineQuery):
                 )
             )
 
+    # answer должен вызываться всегда, даже если results пустой
     await query.answer(results, cache_time=1, is_personal=True)
 
 
