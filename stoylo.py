@@ -9,7 +9,7 @@ from aiogram.types import InlineQueryResultCachedDocument
 # НАСТРОЙКИ
 # ============================================================
 
-API_TOKEN = "ВСТАВЬ_СЮДА_СВОЙ_ТОКЕН"
+API_TOKEN = "8712123008:AAHiO9cEOT_Qkghgb7JpsnzReKXVa1oFNGg"
 
 
 # ============================================================
