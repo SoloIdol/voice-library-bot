@@ -29,7 +29,7 @@ AUDIO_DATABASE = [
 @dp.message(F.audio)
 async def get_audio_file_id(message: types.Message):
     file_id = message.audio.file_id
-    await message.reply(f"Ваш file_id:\n`{file_id}`", parse_mode="Markdown")
+    await message.reply(f"Ваш file_id:\n`{file_id}`", parse_mode="HTML")
 
 
 # --- 2. ИНЛАЙН-РЕЖИМ (ПОИСК И ВЫДАЧА ЗВУКОВ) ---
