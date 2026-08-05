@@ -1,10 +1,14 @@
 import asyncio
 import logging
 import os
+import shutil
 import tempfile
 
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import InlineQueryResultCachedVoice
+from aiogram.types import (
+    InlineQueryResultCachedVoice,
+    FSInputFile,
+)
 from aiogram.exceptions import TelegramConflictError
 
 
@@ -12,10 +16,12 @@ from aiogram.exceptions import TelegramConflictError
 # НАСТРОЙКИ
 # ============================================================
 
-API_TOKEN = "8712123008:AAHiO9cEOT_Qkghgb7JpsnzReKXVa1oFNGg"
+# Лучше хранить токен в Railway Variables.
+# Railway -> Service -> Variables -> API_TOKEN
+API_TOKEN = os.getenv("API_TOKEN")
 
 # Пока 0 = разрешить обработку файлов всем.
-# После теста лучше вписать сюда свой Telegram ID.
+# После теста впиши сюда свой Telegram ID.
 ADMIN_ID = 0
 
 
@@ -39,6 +45,17 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
+# ПРОВЕРКА ТОКЕНА
+# ============================================================
+
+if not API_TOKEN:
+    raise RuntimeError(
+        "Переменная API_TOKEN не установлена. "
+        "Добавь API_TOKEN в Railway Variables."
+    )
+
+
+# ============================================================
 # BOT
 # ============================================================
 
@@ -51,10 +68,51 @@ dp = Dispatcher()
 # ============================================================
 
 def is_admin(message: types.Message) -> bool:
+
     if ADMIN_ID == 0:
         return True
 
     return message.from_user.id == ADMIN_ID
+
+
+# ============================================================
+# ПРОВЕРКА FFMPEG
+# ============================================================
+
+def check_ffmpeg():
+
+    logger.info("=== ПРОВЕРКА FFMPEG ===")
+
+    ffmpeg_path = shutil.which("ffmpeg")
+
+    if ffmpeg_path is None:
+
+        logger.error(
+            "❌ FFMPEG НЕ НАЙДЕН В PATH"
+        )
+
+        return False
+
+    logger.info(
+        "✅ FFMPEG НАЙДЕН: %s",
+        ffmpeg_path,
+    )
+
+    return True
+
+
+# ============================================================
+# ЭКРАНИРОВАНИЕ HTML
+# ============================================================
+
+def escape_html(text: str) -> str:
+
+    return (
+        str(text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 # ============================================================
@@ -99,27 +157,48 @@ async def id_handler(message: types.Message):
 async def audio_handler(message: types.Message):
 
     if not is_admin(message):
-        await message.answer("Нет доступа.")
+
+        await message.answer(
+            "Нет доступа."
+        )
+
         return
 
     if not message.audio:
         return
 
-    original_name = message.audio.file_name or "Голосовое"
+    # ========================================================
+    # НАЗВАНИЕ
+    # ========================================================
+
+    original_name = (
+        message.audio.file_name
+        or "Голосовое"
+    )
 
     title = original_name
 
     if "." in title:
-        title = title.rsplit(".", 1)[0]
+
+        title = title.rsplit(
+            ".",
+            1
+        )[0]
 
     title = title.strip()
 
     if not title:
         title = "Голосовое"
 
+    logger.info(
+        "Получено аудио: %s",
+        title,
+    )
+
     status = await message.answer(
         f"⏳ Конвертирую "
-        f"<b>{title}</b> в голосовое...",
+        f"<b>{escape_html(title)}</b> "
+        f"в голосовое...",
         parse_mode="HTML",
     )
 
@@ -129,12 +208,32 @@ async def audio_handler(message: types.Message):
     try:
 
         # ====================================================
-        # СКАЧИВАЕМ ФАЙЛ ИЗ TELEGRAM
+        # ПРОВЕРЯЕМ FFMPEG
+        # ====================================================
+
+        if not check_ffmpeg():
+
+            raise RuntimeError(
+                "FFmpeg не найден в системе Railway."
+            )
+
+        # ====================================================
+        # ПОЛУЧАЕМ TELEGRAM FILE
         # ====================================================
 
         telegram_file = await bot.get_file(
             message.audio.file_id
         )
+
+        if not telegram_file.file_path:
+
+            raise RuntimeError(
+                "Telegram не вернул путь к файлу."
+            )
+
+        # ====================================================
+        # СОЗДАЁМ ВРЕМЕННЫЙ INPUT
+        # ====================================================
 
         input_temp = tempfile.NamedTemporaryFile(
             suffix=".input",
@@ -142,7 +241,12 @@ async def audio_handler(message: types.Message):
         )
 
         input_path = input_temp.name
+
         input_temp.close()
+
+        # ====================================================
+        # СКАЧИВАЕМ AUDIO
+        # ====================================================
 
         await bot.download_file(
             telegram_file.file_path,
@@ -155,7 +259,7 @@ async def audio_handler(message: types.Message):
         )
 
         # ====================================================
-        # ВЫХОДНОЙ OGG
+        # СОЗДАЁМ ВЫХОДНОЙ OGG
         # ====================================================
 
         output_temp = tempfile.NamedTemporaryFile(
@@ -164,27 +268,37 @@ async def audio_handler(message: types.Message):
         )
 
         output_path = output_temp.name
+
         output_temp.close()
 
         # ====================================================
         # FFMPEG
         # ====================================================
 
+        logger.info(
+            "Начинаем конвертацию: %s -> %s",
+            input_path,
+            output_path,
+        )
+
         process = await asyncio.create_subprocess_exec(
+
             "ffmpeg",
+
             "-y",
+
             "-i",
             input_path,
 
-            # Mono
+            # Telegram Voice — mono
             "-ac",
             "1",
 
-            # Telegram Voice обычно использует Opus
+            # Opus
             "-c:a",
             "libopus",
 
-            # Хорошее качество при небольшом размере
+            # Битрейт
             "-b:a",
             "48k",
 
@@ -203,7 +317,7 @@ async def audio_handler(message: types.Message):
             )
 
             logger.error(
-                "FFmpeg error:\n%s",
+                "FFmpeg завершился с ошибкой:\n%s",
                 ffmpeg_error,
             )
 
@@ -217,19 +331,61 @@ async def audio_handler(message: types.Message):
         )
 
         # ====================================================
-        # ОТПРАВЛЯЕМ КАК TELEGRAM VOICE
+        # ПРОВЕРЯЕМ ЧТО ФАЙЛ СОЗДАН
         # ====================================================
 
-        with open(output_path, "rb") as voice_file:
+        if not os.path.exists(output_path):
 
-            sent_message = await bot.send_voice(
-                chat_id=message.chat.id,
-                voice=voice_file,
-                caption=f"🎤 {title}",
+            raise RuntimeError(
+                "FFmpeg завершился, "
+                "но выходной файл не создан."
+            )
+
+        output_size = os.path.getsize(
+            output_path
+        )
+
+        logger.info(
+            "Размер OGG: %d bytes",
+            output_size,
+        )
+
+        if output_size == 0:
+
+            raise RuntimeError(
+                "Полученный OGG-файл пустой."
             )
 
         # ====================================================
-        # ПОЛУЧАЕМ НАСТОЯЩИЙ VOICE FILE_ID
+        # ОТПРАВЛЯЕМ КАК НАСТОЯЩИЙ TELEGRAM VOICE
+        # ====================================================
+
+        logger.info(
+            "Отправляем OGG как Telegram Voice..."
+        )
+
+        # В aiogram 3.x нельзя передавать
+        # обычный BufferedReader напрямую.
+        #
+        # Используем FSInputFile.
+
+        voice_file = FSInputFile(
+            output_path
+        )
+
+        sent_message = await bot.send_voice(
+
+            chat_id=message.chat.id,
+
+            voice=voice_file,
+
+            caption=(
+                f"🎤 {title}"
+            ),
+        )
+
+        # ====================================================
+        # ПОЛУЧАЕМ VOICE FILE_ID
         # ====================================================
 
         if not sent_message.voice:
@@ -238,21 +394,22 @@ async def audio_handler(message: types.Message):
                 "Telegram не вернул объект voice."
             )
 
-        voice_file_id = sent_message.voice.file_id
+        voice_file_id = (
+            sent_message.voice.file_id
+        )
 
         logger.info(
-            "VOICE file_id получен: %s",
+            "✅ VOICE file_id получен: %s",
             voice_file_id,
         )
 
         # ====================================================
-        # СОХРАНЯЕМ
+        # СОХРАНЯЕМ В БАЗУ
         # ====================================================
 
         global VOICE_DATABASE
 
-        # Если такое название уже есть —
-        # заменяем старую запись.
+        # Удаляем старую запись с таким названием.
 
         VOICE_DATABASE = [
             item
@@ -261,31 +418,59 @@ async def audio_handler(message: types.Message):
             != title.lower()
         ]
 
+        # Создаём новую запись.
+
+        new_id = str(
+            len(VOICE_DATABASE) + 1
+        )
+
         VOICE_DATABASE.append(
             {
-                "id": str(len(VOICE_DATABASE) + 1),
+                "id": new_id,
                 "title": title,
                 "voice_file_id": voice_file_id,
             }
         )
 
+        logger.info(
+            "Добавлено голосовое: %s | %s",
+            title,
+            voice_file_id,
+        )
+
         # ====================================================
-        # ОТВЕТ
+        # ОБНОВЛЯЕМ STATUS
         # ====================================================
+
+        safe_title = escape_html(
+            title
+        )
 
         await status.edit_text(
             "✅ <b>Готово!</b>\n\n"
-            f"Название: <b>{title}</b>\n\n"
-            "Теперь попробуй:\n"
-            f"<code>@твой_бот {title}</code>",
+            f"Название: <b>{safe_title}</b>\n\n"
+            "Теперь попробуй inline-поиск:\n"
+            f"<code>@твой_бот {safe_title}</code>",
             parse_mode="HTML",
+        )
+
+        # ====================================================
+        # ПОКАЗЫВАЕМ FILE_ID
+        # ====================================================
+
+        safe_file_id = escape_html(
+            voice_file_id
         )
 
         await message.answer(
             "VOICE file_id:\n"
-            f"<code>{voice_file_id}</code>",
+            f"<code>{safe_file_id}</code>",
             parse_mode="HTML",
         )
+
+    # ========================================================
+    # ОШИБКА
+    # ========================================================
 
     except Exception as error:
 
@@ -293,31 +478,68 @@ async def audio_handler(message: types.Message):
             "Ошибка обработки аудио"
         )
 
-        await status.edit_text(
-            "❌ <b>Ошибка</b>\n\n"
-            f"<code>{str(error)}</code>",
-            parse_mode="HTML",
+        safe_error = escape_html(
+            str(error)
         )
+
+        try:
+
+            await status.edit_text(
+                "❌ <b>Ошибка</b>\n\n"
+                f"<code>{safe_error}</code>",
+                parse_mode="HTML",
+            )
+
+        except Exception:
+
+            logger.exception(
+                "Не удалось отправить сообщение "
+                "об ошибке пользователю."
+            )
+
+    # ========================================================
+    # УДАЛЕНИЕ TEMP ФАЙЛОВ
+    # ========================================================
 
     finally:
 
-        # ====================================================
-        # УДАЛЯЕМ ВРЕМЕННЫЕ ФАЙЛЫ
-        # ====================================================
-
         if input_path:
+
             try:
-                if os.path.exists(input_path):
-                    os.remove(input_path)
+
+                if os.path.exists(
+                    input_path
+                ):
+
+                    os.remove(
+                        input_path
+                    )
+
             except Exception:
-                pass
+
+                logger.warning(
+                    "Не удалось удалить input: %s",
+                    input_path,
+                )
 
         if output_path:
+
             try:
-                if os.path.exists(output_path):
-                    os.remove(output_path)
+
+                if os.path.exists(
+                    output_path
+                ):
+
+                    os.remove(
+                        output_path
+                    )
+
             except Exception:
-                pass
+
+                logger.warning(
+                    "Не удалось удалить output: %s",
+                    output_path,
+                )
 
 
 # ============================================================
@@ -325,16 +547,24 @@ async def audio_handler(message: types.Message):
 # ============================================================
 
 @dp.message(F.voice)
-async def voice_handler(message: types.Message):
+async def voice_handler(
+    message: types.Message
+):
 
     if not is_admin(message):
-        await message.answer("Нет доступа.")
+
+        await message.answer(
+            "Нет доступа."
+        )
+
         return
 
     if not message.voice:
         return
 
-    voice_file_id = message.voice.file_id
+    voice_file_id = (
+        message.voice.file_id
+    )
 
     title = "Голосовое"
 
@@ -342,16 +572,19 @@ async def voice_handler(message: types.Message):
 
     VOICE_DATABASE.append(
         {
-            "id": str(len(VOICE_DATABASE) + 1),
+            "id": str(
+                len(VOICE_DATABASE) + 1
+            ),
             "title": title,
             "voice_file_id": voice_file_id,
         }
     )
 
     await message.answer(
-        "✅ Это уже настоящее Telegram Voice.\n\n"
+        "✅ Это уже настоящее "
+        "Telegram Voice.\n\n"
         "VOICE file_id:\n"
-        f"<code>{voice_file_id}</code>",
+        f"<code>{escape_html(voice_file_id)}</code>",
         parse_mode="HTML",
     )
 
@@ -361,12 +594,16 @@ async def voice_handler(message: types.Message):
 # ============================================================
 
 @dp.message(F.text == "/list")
-async def list_handler(message: types.Message):
+async def list_handler(
+    message: types.Message
+):
 
     if not VOICE_DATABASE:
+
         await message.answer(
             "База голосовых пока пустая."
         )
+
         return
 
     lines = [
@@ -380,7 +617,8 @@ async def list_handler(message: types.Message):
     ):
 
         lines.append(
-            f"{index}. {item['title']}"
+            f"{index}. "
+            f"{escape_html(item['title'])}"
         )
 
     await message.answer(
@@ -394,10 +632,16 @@ async def list_handler(message: types.Message):
 # ============================================================
 
 @dp.message(F.text == "/clear")
-async def clear_handler(message: types.Message):
+async def clear_handler(
+    message: types.Message
+):
 
     if not is_admin(message):
-        await message.answer("Нет доступа.")
+
+        await message.answer(
+            "Нет доступа."
+        )
+
         return
 
     global VOICE_DATABASE
@@ -410,7 +654,7 @@ async def clear_handler(message: types.Message):
 
 
 # ============================================================
-# INLINE
+# INLINE SEARCH
 # ============================================================
 
 @dp.inline_query()
@@ -418,7 +662,9 @@ async def inline_query_handler(
     query: types.InlineQuery
 ):
 
-    search_text = query.query.strip().lower()
+    search_text = (
+        query.query.strip().lower()
+    )
 
     results = []
 
@@ -432,15 +678,24 @@ async def inline_query_handler(
             item.get("voice_file_id", "")
         ).strip()
 
+        # Пропускаем битые записи.
+
         if not title:
             continue
 
         if not voice_file_id:
             continue
 
+        # Поиск по названию.
+
         if search_text:
+
             if search_text not in title.lower():
                 continue
+
+        # ====================================================
+        # НАСТОЯЩИЙ TELEGRAM VOICE
+        # ====================================================
 
         results.append(
             InlineQueryResultCachedVoice(
@@ -482,7 +737,16 @@ async def main():
         "Запуск бота..."
     )
 
-    # Убираем webhook и старые ожидающие updates.
+    # ========================================================
+    # FFMPEG
+    # ========================================================
+
+    check_ffmpeg()
+
+    # ========================================================
+    # WEBHOOK
+    # ========================================================
+
     await bot.delete_webhook(
         drop_pending_updates=True
     )
@@ -495,13 +759,16 @@ async def main():
 
         await dp.start_polling(
             bot,
-            allowed_updates=dp.resolve_used_update_types(),
+            allowed_updates=(
+                dp.resolve_used_update_types()
+            ),
         )
 
     except TelegramConflictError:
 
         logger.error(
-            "Запущен другой экземпляр бота."
+            "TelegramConflictError: "
+            "запущен другой экземпляр бота."
         )
 
         raise
@@ -523,7 +790,9 @@ if __name__ == "__main__":
 
     try:
 
-        asyncio.run(main())
+        asyncio.run(
+            main()
+        )
 
     except KeyboardInterrupt:
 
