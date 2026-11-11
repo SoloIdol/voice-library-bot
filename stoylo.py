@@ -20,9 +20,8 @@ from aiogram.types import (
 
 API_TOKEN = os.getenv("API_TOKEN")
 
-# 0 = разрешить управление библиотекой всем.
-# После теста обязательно впиши сюда свой Telegram ID.
-ADMIN_ID = 728245521
+
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 
 DATABASE_PATH = "voices.db"
